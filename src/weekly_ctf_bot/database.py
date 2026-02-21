@@ -1,9 +1,19 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Sequence
 from urllib.parse import quote, unquote
 
-from sqlalchemy import BIGINT, TEXT, VARCHAR, Dialect, TypeDecorator, select
+from sqlalchemy import (
+    BIGINT,
+    TEXT,
+    VARCHAR,
+    Dialect,
+    ForeignKey,
+    TypeDecorator,
+    delete,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import (
     AsyncAttrs,
     AsyncEngine,
@@ -11,7 +21,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 MAX_FLAG_LENGTH = 32
 
@@ -48,6 +58,9 @@ class FileList(TypeDecorator[list[File]]):
         if value is None:
             return None
 
+        if value == "":
+            return []
+
         return [
             File(
                 filename=unquote((file_pieces := file.split(" "))[0]),
@@ -79,15 +92,16 @@ class Timestamp(TypeDecorator[datetime]):
 class Challenge(Base):
     __tablename__ = "challenge"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(VARCHAR(32))
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(VARCHAR(32), unique=True)
     description: Mapped[str] = mapped_column(TEXT)
+    visible: Mapped[bool]
     flag: Mapped[str] = mapped_column(VARCHAR(MAX_FLAG_LENGTH))
     files: Mapped[list[File]] = mapped_column(FileList)
     url: Mapped[str] = mapped_column(VARCHAR(64))
     start: Mapped[datetime] = mapped_column(Timestamp)
-    finish: Mapped[datetime | None] = mapped_column(Timestamp)
-    submissions: Mapped[list[Submission]] = relationship(back_populates="challenge")
+    finish: Mapped[datetime] = mapped_column(Timestamp)
+    # submissions: Mapped[list[Submission]] = relationship(back_populates="challenge")
 
 
 class Submission(Base):
@@ -97,7 +111,8 @@ class Submission(Base):
     user_id: Mapped[int] = mapped_column(BIGINT)
     timestamp: Mapped[datetime] = mapped_column(Timestamp)
     flag: Mapped[str] = mapped_column(VARCHAR(MAX_FLAG_LENGTH))
-    challenge: Mapped[Challenge] = relationship(back_populates="submissions")
+    challenge_id: Mapped[int] = mapped_column(ForeignKey("challenge.id"))
+    # challenge: Mapped[Challenge] = relationship(back_populates="submissions")
 
 
 class Database:
@@ -108,5 +123,67 @@ class Database:
         self.engine = create_async_engine(url)
         self.session_maker = async_sessionmaker(self.engine, expire_on_commit=False)
 
+    async def get_active_challenges(self) -> Sequence[Challenge]:
+        async with self.session_maker() as session:
+            now = datetime.now().replace(tzinfo=timezone.utc)
+            stmt = (
+                select(Challenge)
+                .where(Challenge.visible)
+                .where(Challenge.start <= now)
+                .where(Challenge.finish > now)
+                .order_by(Challenge.start)
+            )
+
+            return (await session.scalars(stmt)).all()
+
+    async def get_challenge(self, name: str) -> Challenge | None:
+        async with self.session_maker() as session:
+            stmt = select(Challenge).where(Challenge.name.istartswith(name))
+            return (await session.scalars(stmt)).first()
+
+    async def add_challenge(self, chal: Challenge):
+        async with self.session_maker.begin() as session:
+            session.add(chal)
+
+    async def update_challenge(self, id: int, **kwargs: dict[str, Any]):
+        async with self.session_maker.begin() as session:
+            stmt = update(Challenge).where(Challenge.id == id).values(**kwargs)
+            await session.execute(stmt)
+
+    async def delete_challenge(self, id: int):
+        async with self.session_maker.begin() as session:
+            stmt = delete(Challenge).where(Challenge.id == id)
+            await session.execute(stmt)
+
+    async def get_submissions(self, challenge_id: int) -> Sequence[Submission]:
+        async with self.session_maker() as session:
+            stmt = select(Submission).where(Submission.challenge_id == challenge_id)
+            return (await session.scalars(stmt)).all()
+
+    async def add_submission(self, challenge_id: int, user_id: int, flag: str):
+        async with self.session_maker.begin() as session:
+            session.add(
+                Submission(
+                    user_id=user_id,
+                    timestamp=datetime.now(),
+                    flag=flag,
+                    challenge_id=challenge_id,
+                )
+            )
+
+    async def delete_submission(self, id: int):
+        async with self.session_maker.begin() as session:
+            stmt = delete(Submission).where(Submission.id == id)
+            await session.execute(stmt)
+
     async def close(self):
         await self.engine.dispose()
+
+
+async def get_database(url: str) -> Database:
+    db = Database(url)
+
+    async with db.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    return db
