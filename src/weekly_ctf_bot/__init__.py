@@ -1,4 +1,5 @@
 import traceback
+from platform import python_version
 from typing import Any
 
 import discord
@@ -13,13 +14,16 @@ class ChallengeBot(commands.Bot):
     def __init__(self, config: Config):
         self.config = config
 
+        logger.info(f"Discord.py API version: {discord.__version__}")
+        logger.info(f"Python version: {python_version()}")
+
         intents = discord.Intents.default()
         super().__init__(command_prefix=".", intents=intents, help_command=None)
 
     async def setup_hook(self):
         self.tree.on_error = self.on_app_command_error
 
-        COGS = ["general", "ctfd"]
+        COGS = ["general", "challenges"]
 
         for cog in COGS:
             await self.load_extension(f"{__name__}.cogs.{cog}")
@@ -30,7 +34,10 @@ class ChallengeBot(commands.Bot):
         logger.debug(f"Synced: {[cmd.name for cmd in synced]}")
 
     async def on_ready(self):
-        pass
+        if self.user is None:
+            raise discord.errors.ClientException("Unable to get client's name!")
+        else:
+            logger.info(f"Logged in as {self.user.name}")
 
     async def on_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError

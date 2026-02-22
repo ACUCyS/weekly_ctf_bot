@@ -52,6 +52,8 @@ class Config:
         default=None, metadata={"parser": normalize_url}
     )
     solve_webhook: str | None = field(default=None, metadata={"parser": normalize_url})
+    challenge_cache: int = field(default=5, metadata={"parser": parse_positive_int})
+    webhook_timeout: int = field(default=10, metadata={"parser": parse_positive_int})
     bot_mode: BotMode = field(
         default=BotMode.DEVELOPMENT, metadata={"parser": BotMode.parse}
     )

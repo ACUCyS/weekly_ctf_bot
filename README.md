@@ -63,6 +63,8 @@ Fill in required values:
 - `AUTHOR_ROLE_ID=<the ID of the Discord role that can edit challenges>`
 - `ANNOUNCEMENT_WEBHOOK=<the url for the announcements webhook>`
 - `SOLVE_WEBHOOK=<the url for the solve webhook>`
+- `CHALLENGE_CACHE=<the lifetime of the challenge cache>`
+- `WEBHOOK_TIMEOUT=<the timeout for webhook requests>`
 
 ### 4. Run Bot
 

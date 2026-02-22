@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     TypeDecorator,
     delete,
+    func,
     select,
     update,
 )
@@ -111,6 +112,7 @@ class Submission(Base):
     user_id: Mapped[int] = mapped_column(BIGINT)
     timestamp: Mapped[datetime] = mapped_column(Timestamp)
     flag: Mapped[str] = mapped_column(VARCHAR(MAX_FLAG_LENGTH))
+    is_correct: Mapped[bool]
     challenge_id: Mapped[int] = mapped_column(ForeignKey("challenge.id"))
     # challenge: Mapped[Challenge] = relationship(back_populates="submissions")
 
@@ -122,6 +124,15 @@ class Database:
     def __init__(self, url: str):
         self.engine = create_async_engine(url)
         self.session_maker = async_sessionmaker(self.engine, expire_on_commit=False)
+
+    @staticmethod
+    async def create(url: str) -> Database:
+        db = Database(url)
+
+        async with db.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        return db
 
     async def get_active_challenges(self) -> Sequence[Challenge]:
         async with self.session_maker() as session:
@@ -138,7 +149,10 @@ class Database:
 
     async def get_challenge(self, name: str) -> Challenge | None:
         async with self.session_maker() as session:
-            stmt = select(Challenge).where(Challenge.name.istartswith(name))
+            stmt = select(Challenge).where(
+                func.lower(Challenge.name) == func.lower(name)
+            )
+
             return (await session.scalars(stmt)).first()
 
     async def add_challenge(self, chal: Challenge):
@@ -155,21 +169,44 @@ class Database:
             stmt = delete(Challenge).where(Challenge.id == id)
             await session.execute(stmt)
 
-    async def get_submissions(self, challenge_id: int) -> Sequence[Submission]:
+    async def get_submissions(
+        self, challenge_id: int, user_id: int | None = None
+    ) -> Sequence[Submission]:
         async with self.session_maker() as session:
             stmt = select(Submission).where(Submission.challenge_id == challenge_id)
+            if user_id is not None:
+                stmt = stmt.where(Submission.user_id == user_id)
+
             return (await session.scalars(stmt)).all()
 
-    async def add_submission(self, challenge_id: int, user_id: int, flag: str):
+    async def get_solve(self, challenge_id: int, user_id: int) -> Submission | None:
+        async with self.session_maker() as session:
+            stmt = (
+                select(Submission)
+                .where(Submission.is_correct)
+                .where(Submission.challenge_id == challenge_id)
+                .where(Submission.user_id == user_id)
+            )
+
+            return (await session.scalars(stmt)).first()
+
+    async def add_submission(
+        self, challenge: Challenge, user_id: int, flag: str
+    ) -> bool:
+        is_correct = flag.lower() == challenge.flag.lower()
+
         async with self.session_maker.begin() as session:
             session.add(
                 Submission(
                     user_id=user_id,
                     timestamp=datetime.now(),
                     flag=flag,
-                    challenge_id=challenge_id,
+                    is_correct=is_correct,
+                    challenge_id=challenge.id,
                 )
             )
+
+        return is_correct
 
     async def delete_submission(self, id: int):
         async with self.session_maker.begin() as session:
@@ -178,12 +215,3 @@ class Database:
 
     async def close(self):
         await self.engine.dispose()
-
-
-async def get_database(url: str) -> Database:
-    db = Database(url)
-
-    async with db.engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    return db
