@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 from loguru import logger
 
-from weekly_ctf_bot.config import BotMode, Config
+from .config import BotMode, Config
 
 
 class ChallengeBot(commands.Bot):

@@ -108,7 +108,7 @@ class Challenge(Base):
 class Submission(Base):
     __tablename__ = "submission"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT)
     timestamp: Mapped[datetime] = mapped_column(Timestamp)
     flag: Mapped[str] = mapped_column(VARCHAR(MAX_FLAG_LENGTH))
@@ -153,6 +153,11 @@ class Database:
                 func.lower(Challenge.name) == func.lower(name)
             )
 
+            return (await session.scalars(stmt)).first()
+
+    async def get_challenge_by_id(self, id: int) -> Challenge | None:
+        async with self.session_maker() as session:
+            stmt = select(Challenge).where(Challenge.id == id)
             return (await session.scalars(stmt)).first()
 
     async def add_challenge(self, chal: Challenge):

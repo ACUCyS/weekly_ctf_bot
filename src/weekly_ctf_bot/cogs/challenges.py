@@ -4,8 +4,9 @@ from aiohttp import ClientSession, ClientTimeout
 from discord import Color, Embed, Interaction, Webhook, app_commands
 from discord.ext import commands
 
-from weekly_ctf_bot import ChallengeBot
-from weekly_ctf_bot.database import Challenge, Database
+from .. import ChallengeBot
+from ..database import Challenge, Database
+from ..ui import ActiveChallengesView, ChallengeView
 
 
 class Challenges(commands.Cog):
@@ -91,7 +92,7 @@ class Challenges(commands.Cog):
             if challenge_obj is None:
                 embed = Embed(
                     title=TITLE,
-                    description=f"There are no challenges by the name `{challenge}`.",
+                    description=f"There are no challenges by the name `{challenge}`!",
                     color=Color.red(),
                     timestamp=datetime.now(timezone.utc),
                 )
@@ -146,6 +147,47 @@ class Challenges(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    @app_commands.command(
+        name="challenge", description="Get information about the current challenge(s)."
+    )
+    @app_commands.describe(
+        challenge="The challenge to view. Leave blank to view the current challenge."
+    )
+    async def challenge(self, interaction: Interaction, challenge: str | None):
+        is_author = (
+            False
+            if self.client.config.author_role_id is None
+            else (
+                interaction.user.get_role(self.client.config.author_role_id) is not None  # type: ignore
+            )
+        )
+
+        if challenge is None or challenge.strip() == "":
+            active_challenges = await self.get_active_challenges()
+            await interaction.response.send_message(
+                view=ActiveChallengesView(self.database, active_challenges, is_author),
+                ephemeral=True,
+            )
+
+        else:
+            challenge_obj = await self.database.get_challenge(challenge)
+            if challenge_obj is None:
+                embed = Embed(
+                    title="CTF Challenges",
+                    description=f"There are no challenges by the name `{challenge}`!",
+                    color=Color.red(),
+                    timestamp=datetime.now(timezone.utc),
+                )
+
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+
+            await interaction.response.send_message(
+                view=ChallengeView(self.database, challenge_obj, is_author),
+                ephemeral=True,
+            )
+
+    @challenge.autocomplete("challenge")
     @submit_flag.autocomplete("challenge")
     async def challenge_autocomplete(
         self, _interaction: Interaction, current: str

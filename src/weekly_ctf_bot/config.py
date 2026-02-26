@@ -4,7 +4,7 @@ from enum import StrEnum
 from typing import Any, Self
 from urllib.parse import urlparse, urlunparse
 
-from weekly_ctf_bot.errors import ConfigError
+from .errors import ConfigError
 
 
 def normalize_url(url: str) -> str:

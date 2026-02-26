@@ -4,7 +4,7 @@ from datetime import timedelta
 from discord import Color, Embed, Interaction, app_commands
 from discord.ext import commands
 
-from weekly_ctf_bot import ChallengeBot
+from .. import ChallengeBot
 
 
 class General(commands.Cog):

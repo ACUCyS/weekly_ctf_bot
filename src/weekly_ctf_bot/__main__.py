@@ -6,8 +6,8 @@ from datetime import datetime
 import dotenv
 from loguru import logger
 
-from weekly_ctf_bot import ChallengeBot
-from weekly_ctf_bot.config import BotMode, Config
+from . import ChallengeBot
+from .config import BotMode, Config
 
 
 async def async_main(config: Config):
