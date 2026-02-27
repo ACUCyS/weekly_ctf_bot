@@ -8,11 +8,16 @@ from discord.ext import commands
 from loguru import logger
 
 from .config import BotMode, Config
+from .database import Database
 
 
 class ChallengeBot(commands.Bot):
-    def __init__(self, config: Config):
+    config: Config
+    database: Database
+
+    def __init__(self, config: Config, database: Database):
         self.config = config
+        self.database = database
 
         logger.info(f"Discord.py API version: {discord.__version__}")
         logger.info(f"Python version: {python_version()}")

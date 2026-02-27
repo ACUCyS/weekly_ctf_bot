@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
 from urllib.parse import quote, unquote
@@ -31,44 +30,30 @@ class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 
-@dataclass(slots=True)
-class File:
-    filename: str
-    url: str
-
-
 def uri_encode(uri: str) -> str:
     return quote(uri, safe="-_.!~*'();/?:@&=+$,#")
 
 
-class FileList(TypeDecorator[list[File]]):
+class FileList(TypeDecorator[list[str]]):
     impl = TEXT
     cache_ok = True
 
-    def process_bind_param(self, value: list[File] | None, dialect: Dialect) -> Any:
+    def process_bind_param(self, value: list[str] | None, dialect: Dialect) -> Any:
         if value is None:
             return ""
 
-        return "^".join(
-            [f"{uri_encode(file.filename)} {uri_encode(file.url)}" for file in value]
-        )
+        return "\n".join([uri_encode(file) for file in value])
 
     def process_result_value(
         self, value: Any | None, dialect: Dialect
-    ) -> list[File] | None:
+    ) -> list[str] | None:
         if value is None:
             return None
 
         if value == "":
             return []
 
-        return [
-            File(
-                filename=unquote((file_pieces := file.split(" "))[0]),
-                url=unquote(file_pieces[1]),
-            )
-            for file in value.split("^")
-        ]
+        return [unquote(file) for file in value.split("\n")]
 
 
 class Timestamp(TypeDecorator[datetime]):
@@ -98,7 +83,7 @@ class Challenge(Base):
     description: Mapped[str] = mapped_column(TEXT)
     visible: Mapped[bool]
     flag: Mapped[str] = mapped_column(VARCHAR(MAX_FLAG_LENGTH))
-    files: Mapped[list[File]] = mapped_column(FileList)
+    files: Mapped[list[str]] = mapped_column(FileList)
     url: Mapped[str] = mapped_column(VARCHAR(64))
     start: Mapped[datetime] = mapped_column(Timestamp)
     finish: Mapped[datetime] = mapped_column(Timestamp)
@@ -134,6 +119,18 @@ class Database:
 
         return db
 
+    async def close(self):
+        await self.engine.dispose()
+
+    async def __aenter__(self):
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        return self
+
+    async def __aexit__(self, *exc: Any):
+        await self.close()
+
     async def get_active_challenges(self) -> Sequence[Challenge]:
         async with self.session_maker() as session:
             now = datetime.now().replace(tzinfo=timezone.utc)
@@ -164,7 +161,7 @@ class Database:
         async with self.session_maker.begin() as session:
             session.add(chal)
 
-    async def update_challenge(self, id: int, **kwargs: dict[str, Any]):
+    async def update_challenge(self, id: int, **kwargs: Any):
         async with self.session_maker.begin() as session:
             stmt = update(Challenge).where(Challenge.id == id).values(**kwargs)
             await session.execute(stmt)
@@ -217,6 +214,3 @@ class Database:
         async with self.session_maker.begin() as session:
             stmt = delete(Submission).where(Submission.id == id)
             await session.execute(stmt)
-
-    async def close(self):
-        await self.engine.dispose()
