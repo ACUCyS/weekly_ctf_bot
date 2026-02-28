@@ -1,18 +1,17 @@
 [project]
 name = "weekly_ctf_bot"
-version = "0.1.0"
+version = "1.0.0"
 description = "Official ACUCyS Discord bot for handling weekly CTF challenges."
 authors = [{ name = "PyPylia", email = "me@pypylia.dev" }]
 license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.14,<4.0"
 dependencies = [
-    # Some modal components (e.g. Checkbox) are not published yet, update this back to PyPI when it's published.
-    "discord-py @ git+https://github.com/Rapptz/discord.py.git",
+    "discord-py (>=2.7.0,<3.0.0)",
     "loguru (>=0.7.3,<0.8.0)",
     "python-dotenv (>=1.2.1,<2.0.0)",
     "pre-commit (>=4.5.1,<5.0.0)",
-    "sqlalchemy[asyncio] (>=2.0.46,<3.0.0)",
+    "sqlalchemy[asyncio] (>=2.0.47,<3.0.0)",
     "aiosqlite (>=0.22.1,<0.23.0)",
 ]
 
