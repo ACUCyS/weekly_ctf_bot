@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Self, Sequence
+from typing import Self
 
-from discord import Color, Embed, Interaction, SelectOption, ui
+from discord import ButtonStyle, Color, Embed, Interaction, SelectOption, ui
 
-from .. import ChallengeBot
+from .. import ChallengeBot, handle_error
 from ..database import Challenge, Submission
 
 
@@ -16,11 +16,11 @@ class UserSubmissions:
 
 
 async def format_submissions(
-    client: ChallengeBot, submissions: Sequence[Submission]
+    client: ChallengeBot, challenge_id: int
 ) -> dict[int, UserSubmissions]:
     user_submissions: dict[int, UserSubmissions] = {}
 
-    for submission in submissions:
+    for submission in await client.database.get_submissions(challenge_id):
         if submission.user_id in user_submissions:
             user = user_submissions[submission.user_id]
 
@@ -30,6 +30,8 @@ async def format_submissions(
                 has_solved=False,
                 submissions=[],
             )
+
+            user_submissions[submission.user_id] = user
 
         if submission.is_correct:
             user.has_solved = True
@@ -45,7 +47,7 @@ class SubmissionSelect[V: ui.Modal](ui.Select[V]):
             placeholder="Select a submission...",
             options=[
                 SelectOption(
-                    label=f"{submission.id} - <t:{int(submission.timestamp.timestamp())}:S>",
+                    label=f"{submission.id} - {submission.timestamp.isoformat()} UTC {'(solve)' if submission.is_correct else ''}",
                     value=str(submission.id),
                 )
                 for submission in user.submissions
@@ -56,8 +58,8 @@ class SubmissionSelect[V: ui.Modal](ui.Select[V]):
 class DeleteModal(ui.Modal):
     def __init__(
         self,
-        user: UserSubmissions,
         client: ChallengeBot,
+        user: UserSubmissions,
     ):
         super().__init__(title="Delete submissions")
 
@@ -68,13 +70,16 @@ class DeleteModal(ui.Modal):
             ui.Label(text="Select a submission to delete.", component=self.submission)
         )
 
+    async def on_error(self, interaction: Interaction, error: Exception):
+        await handle_error(interaction, error, self.client.config)
+
     async def on_submit(self, interaction: Interaction):
         submission_id = int(self.submission.values[0])
         await self.client.database.delete_submission(submission_id)
 
         embed = Embed(
             title="Submission deletion",
-            description=f"Successfully deleted submission #{submission_id}",
+            description=f"Successfully deleted submission #{submission_id}.",
             color=Color.green(),
             timestamp=datetime.now(timezone.utc),
         )
@@ -85,26 +90,28 @@ class DeleteModal(ui.Modal):
 class DeleteButton[V: ui.LayoutView](ui.Button[V]):
     def __init__(
         self,
-        user: UserSubmissions,
         client: ChallengeBot,
+        user: UserSubmissions,
     ):
-        super().__init__(label="Delete a submission")
+        super().__init__(label="Delete a submission", style=ButtonStyle.danger)
 
         self.client = client
         self.user = user
 
     async def callback(self, interaction: Interaction):
-        await interaction.response.send_modal(DeleteModal(self.user, self.client))
+        await interaction.response.send_modal(DeleteModal(self.client, self.user))
 
 
 class UserSubmissionsView(ui.LayoutView):
     def __init__(
         self,
-        user: UserSubmissions,
         client: ChallengeBot,
+        user: UserSubmissions,
         challenge: Challenge,
     ):
         super().__init__()
+
+        self.client = client
 
         container: ui.Container[Self] = ui.Container()
         self.add_item(container)
@@ -118,7 +125,12 @@ class UserSubmissionsView(ui.LayoutView):
 
         action_row: ui.ActionRow[Self] = ui.ActionRow()
         container.add_item(action_row)
-        action_row.add_item(DeleteButton(user, client))
+        action_row.add_item(DeleteButton(client, user))
+
+    async def on_error(
+        self, interaction: Interaction, error: Exception, item: ui.Item[Self]
+    ):
+        await handle_error(interaction, error, self.client.config)
 
 
 class UserSelect[V: ui.LayoutView](ui.Select[V]):
@@ -143,7 +155,7 @@ class UserSelect[V: ui.LayoutView](ui.Select[V]):
     async def callback(self, interaction: Interaction):
         await interaction.response.send_message(
             view=UserSubmissionsView(
-                self.submissions[int(self.values[0])], self.client, self.challenge
+                self.client, self.submissions[int(self.values[0])], self.challenge
             ),
             ephemeral=True,
         )
@@ -158,6 +170,8 @@ class SubmissionsView(ui.LayoutView):
     ):
         super().__init__()
 
+        self.client = client
+
         container: ui.Container[Self] = ui.Container()
         self.add_item(container)
 
@@ -169,5 +183,12 @@ class SubmissionsView(ui.LayoutView):
 """)
         )
 
-        select_row: ui.ActionRow[Self] = ui.ActionRow()
-        select_row.add_item(UserSelect(client, challenge, submissions))
+        if len(submissions) > 0:
+            action_row: ui.ActionRow[Self] = ui.ActionRow()
+            container.add_item(action_row)
+            action_row.add_item(UserSelect(client, challenge, submissions))
+
+    async def on_error(
+        self, interaction: Interaction, error: Exception, item: ui.Item[Self]
+    ):
+        await handle_error(interaction, error, self.client.config)

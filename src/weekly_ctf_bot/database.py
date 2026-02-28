@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
 from urllib.parse import quote, unquote
@@ -23,37 +24,61 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+MAX_NAME_LENGTH = 32
 MAX_FLAG_LENGTH = 32
+MAX_URL_LENGTH = 64
 
 
 class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 
+@dataclass(slots=True)
+class File:
+    filename: str
+    url: str
+
+
 def uri_encode(uri: str) -> str:
     return quote(uri, safe="-_.!~*'();/?:@&=+$,#")
 
 
-class FileList(TypeDecorator[list[str]]):
+def str_to_file_list(value: str) -> list[File]:
+    if value == "":
+        return []
+
+    return [
+        File(
+            filename=unquote((file_pieces := file.split(" "))[0]),
+            url=unquote(file_pieces[1]),
+        )
+        for file in value.split("\n")
+    ]
+
+
+def file_list_to_str(value: list[File]) -> str:
+    return "\n".join(
+        [f"{uri_encode(file.filename)} {uri_encode(file.url)}" for file in value]
+    )
+
+
+class FileList(TypeDecorator[list[File]]):
     impl = TEXT
     cache_ok = True
 
-    def process_bind_param(self, value: list[str] | None, dialect: Dialect) -> Any:
+    def process_bind_param(self, value: list[File] | None, dialect: Dialect) -> Any:
         if value is None:
             return ""
 
-        return "\n".join([uri_encode(file) for file in value])
+        return file_list_to_str(value)
 
     def process_result_value(
         self, value: Any | None, dialect: Dialect
-    ) -> list[str] | None:
+    ) -> list[File] | None:
         if value is None:
             return None
 
-        if value == "":
-            return []
-
-        return [unquote(file) for file in value.split("\n")]
+        return str_to_file_list(value)
 
 
 class Timestamp(TypeDecorator[datetime]):
@@ -75,19 +100,29 @@ class Timestamp(TypeDecorator[datetime]):
         return datetime.fromtimestamp(value / 1000, timezone.utc)
 
 
+class Server(Base):
+    __tablename__ = "server"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=False)
+    author_role: Mapped[int] = mapped_column(BIGINT)
+    ping_role: Mapped[int] = mapped_column(BIGINT)
+    announcement_channel: Mapped[int] = mapped_column(BIGINT)
+    solve_channel: Mapped[int] = mapped_column(BIGINT)
+
+
 class Challenge(Base):
     __tablename__ = "challenge"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(VARCHAR(32), unique=True)
+    name: Mapped[str] = mapped_column(VARCHAR(MAX_NAME_LENGTH), unique=True)
     description: Mapped[str] = mapped_column(TEXT)
     visible: Mapped[bool]
     flag: Mapped[str] = mapped_column(VARCHAR(MAX_FLAG_LENGTH))
-    files: Mapped[list[str]] = mapped_column(FileList)
-    url: Mapped[str] = mapped_column(VARCHAR(64))
+    files: Mapped[list[File]] = mapped_column(FileList)
+    url: Mapped[str] = mapped_column(VARCHAR(MAX_URL_LENGTH))
     start: Mapped[datetime] = mapped_column(Timestamp)
     finish: Mapped[datetime] = mapped_column(Timestamp)
-    # submissions: Mapped[list[Submission]] = relationship(back_populates="challenge")
+    server_id: Mapped[int] = mapped_column(ForeignKey("server.id"))
 
 
 class Submission(Base):
@@ -99,7 +134,6 @@ class Submission(Base):
     flag: Mapped[str] = mapped_column(VARCHAR(MAX_FLAG_LENGTH))
     is_correct: Mapped[bool]
     challenge_id: Mapped[int] = mapped_column(ForeignKey("challenge.id"))
-    # challenge: Mapped[Challenge] = relationship(back_populates="submissions")
 
 
 class Database:
@@ -131,9 +165,48 @@ class Database:
     async def __aexit__(self, *exc: Any):
         await self.close()
 
-    async def get_active_challenges(self) -> Sequence[Challenge]:
+    async def get_server(self, id: int) -> Server:
+        async with self.session_maker.begin() as session:
+            stmt = select(Server).where(Server.id == id)
+            server = (await session.scalars(stmt)).first()
+
+            if server is not None:
+                return server
+
+            server = Server(
+                id=id,
+                author_role=0,
+                ping_role=0,
+                announcement_channel=0,
+                solve_channel=0,
+            )
+
+            session.add(server)
+            return server
+
+    async def update_server(self, id: int, **kwargs: Any):
+        async with self.session_maker.begin() as session:
+            stmt = update(Server).where(Server.id == id).values(**kwargs)
+            await session.execute(stmt)
+
+    async def get_challenge(self, id: int) -> Challenge | None:
         async with self.session_maker() as session:
-            now = datetime.now().replace(tzinfo=timezone.utc)
+            stmt = select(Challenge).where(Challenge.id == id)
+            return (await session.scalars(stmt)).first()
+
+    async def search_challenge(self, server_id: int, name: str) -> Challenge | None:
+        async with self.session_maker() as session:
+            stmt = (
+                select(Challenge)
+                .where(Challenge.server_id == server_id)
+                .where(func.lower(Challenge.name) == func.lower(name))
+            )
+
+            return (await session.scalars(stmt)).first()
+
+    async def get_active_challenges(self, server_id: int | None) -> Sequence[Challenge]:
+        async with self.session_maker() as session:
+            now = datetime.now(timezone.utc)
             stmt = (
                 select(Challenge)
                 .where(Challenge.visible)
@@ -142,20 +215,22 @@ class Database:
                 .order_by(Challenge.start)
             )
 
+            if server_id is not None:
+                stmt = stmt.where(Challenge.server_id == server_id)
+
             return (await session.scalars(stmt)).all()
 
-    async def get_challenge(self, name: str) -> Challenge | None:
+    async def get_upcoming_challenges(self) -> Sequence[Challenge]:
         async with self.session_maker() as session:
-            stmt = select(Challenge).where(
-                func.lower(Challenge.name) == func.lower(name)
+            now = datetime.now(timezone.utc)
+            stmt = (
+                select(Challenge)
+                .where(Challenge.visible)
+                .where(Challenge.start > now)
+                .order_by(Challenge.start)
             )
 
-            return (await session.scalars(stmt)).first()
-
-    async def get_challenge_by_id(self, id: int) -> Challenge | None:
-        async with self.session_maker() as session:
-            stmt = select(Challenge).where(Challenge.id == id)
-            return (await session.scalars(stmt)).first()
+            return (await session.scalars(stmt)).all()
 
     async def add_challenge(self, chal: Challenge):
         async with self.session_maker.begin() as session:
@@ -171,14 +246,9 @@ class Database:
             stmt = delete(Challenge).where(Challenge.id == id)
             await session.execute(stmt)
 
-    async def get_submissions(
-        self, challenge_id: int, user_id: int | None = None
-    ) -> Sequence[Submission]:
+    async def get_submissions(self, challenge_id: int) -> Sequence[Submission]:
         async with self.session_maker() as session:
             stmt = select(Submission).where(Submission.challenge_id == challenge_id)
-            if user_id is not None:
-                stmt = stmt.where(Submission.user_id == user_id)
-
             return (await session.scalars(stmt)).all()
 
     async def get_solve(self, challenge_id: int, user_id: int) -> Submission | None:

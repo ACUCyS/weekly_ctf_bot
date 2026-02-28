@@ -1,16 +1,17 @@
 from datetime import datetime, timezone
 from typing import Self
 
-from aiohttp import ClientSession, ClientTimeout
-from discord import Color, Embed, Interaction, Webhook, ui
+from discord import Color, Embed, Interaction, TextChannel, ui
 
-from .. import ChallengeBot
-from ..database import Challenge
+from .. import ChallengeBot, handle_error
+from ..database import MAX_FLAG_LENGTH, Challenge
 
 
 async def submit_flag(
     client: ChallengeBot, challenge: Challenge, flag: str, interaction: Interaction
 ):
+    assert interaction.guild_id is not None
+
     TITLE = f":triangular_flag_on_post: Flag submission for {challenge.name}"
 
     solve = await client.database.get_solve(challenge.id, interaction.user.id)
@@ -31,18 +32,14 @@ async def submit_flag(
     )
 
     if is_correct:
-        if client.config.solve_webhook is not None:
-            async with ClientSession(
-                timeout=ClientTimeout(total=client.config.webhook_timeout)
-            ) as session:
-                webhook = Webhook.from_url(
-                    client.config.solve_webhook,
-                    session=session,
-                )
+        server = await client.database.get_server(interaction.guild_id)
+        if server.solve_channel != 0:
+            channel = await client.fetch_channel(server.solve_channel)
+            assert isinstance(channel, TextChannel)
 
-                await webhook.send(
-                    f"<@{interaction.user.id}> just solved {challenge.name}!"
-                )
+            await channel.send(
+                f"<@{interaction.user.id}> just solved {challenge.name}!"
+            )
 
         embed = Embed(
             title=TITLE,
@@ -64,7 +61,8 @@ async def submit_flag(
 
 class SubmitFlagModal(ui.Modal):
     flag: ui.Label[Self] = ui.Label(
-        text="What is the flag?", component=ui.TextInput(min_length=2, max_length=32)
+        text="What is the flag?",
+        component=ui.TextInput(min_length=2, max_length=MAX_FLAG_LENGTH),
     )
 
     def __init__(self, client: ChallengeBot, challenge: Challenge):
@@ -72,6 +70,9 @@ class SubmitFlagModal(ui.Modal):
 
         self.client = client
         self.challenge = challenge
+
+    async def on_error(self, interaction: Interaction, error: Exception):
+        await handle_error(interaction, error, self.client.config)
 
     async def on_submit(self, interaction: Interaction):
         # This is needed to fix type checking.

@@ -1,13 +1,20 @@
 from .challenge import ChallengeView
-from .challenge_select import SelectChallengeView
+from .challenge_select import select_challenge
 from .flag_submission import SubmitFlagModal, submit_flag
-from .new_challenge import InvalidChallengeView, NewChallengeModal
+from .server_settings import ServerSettingsModal, resolve_server
+from .submissions import SubmissionsView, format_submissions
+from .update_challenge import UpdateChallengeModal
+from .update_status import UpdateStatusModal
 
 __all__ = [
     "ChallengeView",
-    "NewChallengeModal",
+    "UpdateChallengeModal",
     "SubmitFlagModal",
     "submit_flag",
-    "InvalidChallengeView",
-    "SelectChallengeView",
+    "select_challenge",
+    "format_submissions",
+    "SubmissionsView",
+    "UpdateStatusModal",
+    "ServerSettingsModal",
+    "resolve_server",
 ]

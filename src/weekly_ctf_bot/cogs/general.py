@@ -5,6 +5,7 @@ from discord import Color, Embed, Interaction, app_commands
 from discord.ext import commands
 
 from .. import ChallengeBot
+from ..ui import ServerSettingsModal, resolve_server
 
 
 class General(commands.Cog):
@@ -39,6 +40,18 @@ class General(commands.Cog):
             color=Color.green(),
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="server-settings", description="Set the server settings."
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def server_settings(self, interaction: Interaction):
+        assert interaction.guild_id is not None
+        await interaction.response.send_modal(
+            ServerSettingsModal(
+                self.client, await resolve_server(self.client, interaction.guild_id)
+            )
+        )
 
 
 async def setup(client: ChallengeBot):
