@@ -6,13 +6,15 @@ from datetime import datetime
 import dotenv
 from loguru import logger
 
-from weekly_ctf_bot import ChallengeBot
-from weekly_ctf_bot.config import BotMode, Config
+from . import ChallengeBot
+from .config import BotMode, Config
+from .database import Database
 
 
 async def async_main(config: Config):
-    async with ChallengeBot(config) as client:
-        await client.start(config.bot_token, reconnect=True)
+    async with Database(config.database_url) as database:
+        async with ChallengeBot(config, database) as client:
+            await client.start(config.bot_token, reconnect=True)
 
 
 def main():

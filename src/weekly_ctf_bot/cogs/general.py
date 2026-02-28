@@ -1,13 +1,11 @@
 import time
 from datetime import timedelta
-from platform import python_version
 
-import discord
-from discord import app_commands
+from discord import Color, Embed, Interaction, app_commands
 from discord.ext import commands
-from loguru import logger
 
-from weekly_ctf_bot import ChallengeBot
+from .. import ChallengeBot
+from ..ui import ServerSettingsModal, resolve_server
 
 
 class General(commands.Cog):
@@ -18,22 +16,13 @@ class General(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        if self.client.user is None:
-            raise discord.errors.ClientException("Unable to get client's name!")
-        else:
-            logger.info(f"Logged in as {self.client.user.name}")
-
-        logger.info(f"Discord.py API version: {discord.__version__}")
-        logger.info(f"Python version: {python_version()}")
-
-        self.start_time = time.time()
-
-        logger.success("Bot is ready!")
+        if self.start_time is None:
+            self.start_time = time.time()
 
     @app_commands.command(
         name="uptime", description="Displays how long the bot has been running."
     )
-    async def uptime(self, interaction: discord.Interaction):
+    async def uptime(self, interaction: Interaction):
         if self.start_time is None:
             await interaction.response.send_message(
                 "Uptime tracking has not started yet. Please wait a moment.",
@@ -45,12 +34,24 @@ class General(commands.Cog):
         elapsed = int(round(current_time - self.start_time))
         uptime_text = str(timedelta(seconds=elapsed))
 
-        embed = discord.Embed(
+        embed = Embed(
             title=":clock: Uptime",
             description=f"The bot has been running for `{uptime_text}`.",
-            color=discord.Color.green(),
+            color=Color.green(),
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="server-settings", description="Set the server settings."
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def server_settings(self, interaction: Interaction):
+        assert interaction.guild_id is not None
+        await interaction.response.send_modal(
+            ServerSettingsModal(
+                self.client, await resolve_server(self.client, interaction.guild_id)
+            )
+        )
 
 
 async def setup(client: ChallengeBot):
