@@ -12,13 +12,14 @@ weekly_ctf_bot/
 ├── src/
 │   └── weekly_ctf_bot/   # Project source root
 │       ├── cogs/         # Discord slash commands
+│       ├── ui/           # Discord message views and modals
 │       ├── config.py     # Configuration handler
 │       ├── database.py   # Abstraction for database models and access
-│       ├── errors.py     # Project error definitions
 │       ├── __init__.py   # Main bot code
 │       └── __main__.py   # Bot entrypoint
 │
 ├── .env                  # Environment variables
+├── challenges.db         # SQLite database
 ├── CONTRIBUTING.md       # Contributing guide
 ├── LICENSE               # Project software license
 ├── pyproject.toml        # Project metadata & dependencies
